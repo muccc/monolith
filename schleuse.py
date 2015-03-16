@@ -138,7 +138,10 @@ class SchleuseUDP(threading.Thread):
 
         while True:
             data, addr = sock.recvfrom(1024) # buffer size is 1024 bytes
-            self.consumer.put((data, addr))
+            try:
+                self.consumer.put((data, addr), False)
+            except:
+                pass
             #print "received message:", data
 
 class DoorstateHTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
@@ -213,7 +216,7 @@ def main():
     channel = sys.argv[2]
     nickname = sys.argv[3]
 
-    message_queue = Queue.Queue()
+    message_queue = Queue.Queue(5)
 
     bot = SchleuseBot(channel, nickname, server, message_queue, port)
     bot_thread = threading.Thread(target=bot.start)
