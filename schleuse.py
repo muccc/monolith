@@ -3,6 +3,7 @@
 import irc.bot
 import irc.strings
 import socket
+import ssl
 import threading
 import Queue
 import time
@@ -16,8 +17,9 @@ class SchleuseBot(irc.bot.SingleServerIRCBot):
     doorstate_closed = "closed"
     doorstate_open = "open"
 
-    def __init__(self, channel, nickname, server, message_queue, port=6667):
-        irc.bot.SingleServerIRCBot.__init__(self, [(server, port)], nickname, nickname)
+    def __init__(self, channel, nickname, server, message_queue, port=6697):
+        ssl_factory = irc.connection.Factory(wrapper=ssl.wrap_socket)
+        irc.bot.SingleServerIRCBot.__init__(self, [(server, port)], nickname, nickname, connect_factory=ssl_factory)
         self.channel = channel
         self.message_queue = message_queue
         self.lastSchlaubergerTime = 0
@@ -179,7 +181,7 @@ class SpaceAPIHTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             "url":"http://muc.ccc.de/",
             "address":"Schleissheimer Str. 41, 80797 Muenchen, Germany",
             "contact":{
-                "irc":"irc://ray.blafasel.de/#ccc",
+                "irc":"ircs://irc.darkfasel.net/#ccc",
                 "twitter":"@muccc",
                 "email":"info@muc.ccc.de",
                 "ml":"talk@lists.muc.ccc.de"
@@ -212,7 +214,7 @@ def main():
             print("Error: Erroneous port.")
             sys.exit(1)
     else:
-        port = 6667
+        port = 6697
     channel = sys.argv[2]
     nickname = sys.argv[3]
 
