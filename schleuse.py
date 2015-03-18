@@ -1,6 +1,7 @@
 #! /usr/bin/env python
 
 import irc.bot
+import irc.client
 import irc.strings
 import socket
 import ssl
@@ -12,6 +13,9 @@ import BaseHTTPServer
 import SocketServer
 import json
 import logging
+
+# Work around decoding invalid UTF-8
+irc.client.ServerConnection.buffer_class.errors = 'replace'
 
 class SchleuseBot(irc.bot.SingleServerIRCBot):
     doorstate_closed = "closed"
