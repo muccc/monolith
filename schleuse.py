@@ -13,6 +13,7 @@ import BaseHTTPServer
 import SocketServer
 import json
 import logging
+import urllib
 
 # Work around decoding invalid UTF-8
 irc.client.ServerConnection.buffer_class.errors = 'replace'
@@ -32,6 +33,7 @@ class SchleuseBot(irc.bot.SingleServerIRCBot):
         self.doorstate = "fnord"
         self.topic = None
         self.debug = True
+        self.nextevent = None
 
     def start(self):
         while True:
@@ -56,12 +58,18 @@ class SchleuseBot(irc.bot.SingleServerIRCBot):
 
     def notice(self, msg):
         self.connection.privmsg(self.channel, msg)
-    
+
     def setTopic(self, topic):
-        if self.debug: print "Setting topic to " + topic
+        if self.debug: print("Setting topic to " + topic)
         self.connection.topic(self.channel, topic)
 
     def message_check(self):
+        nextevent = json.load(urllib.urlopen('http://api.muc.ccc.de/nextevent.json'))
+        nextevent_topic = 'next event: %s %s %s' % (nextevent['date'], nextevent['time'], nextevent['name'])
+        new_topic = re.sub(r'next event:[^|]*(?= |$)', nextevent_topic , self.topic)
+        if new_topic != self.topic:
+            self.setTopic(new_topic)
+
         while not self.message_queue.empty():
             data, addr = self.message_queue.get()
             data = data.strip()
