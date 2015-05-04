@@ -40,10 +40,10 @@ class SchleuseBot(irc.bot.SingleServerIRCBot):
             try:
                 irc.bot.SingleServerIRCBot.start(self)
             except irc.client.ServerNotConnectedError:
-                print 'Lost connection to server. Restarting'
+                print('Lost connection to server. Restarting')
             except:
                 import traceback
-                print traceback.format_exc()
+                print(traceback.format_exc())
 
 
     def on_nicknameinuse(self, c, e):
@@ -92,7 +92,7 @@ class SchleuseBot(irc.bot.SingleServerIRCBot):
                 return
 
             if self.debug or data != self.doorstate:
-                print "received: " + data
+                print("received: " + data)
 
             #if data == "public":
             #    data = "party"
@@ -100,17 +100,17 @@ class SchleuseBot(irc.bot.SingleServerIRCBot):
             self.doorstate = data
 
             if self.topic:
-                if self.debug: print "got a topic %s" % self.topic
+                if self.debug: print("got a topic %s" % self.topic)
                 m = re.match(r'\bclub\b (\b\w*\b)', self.topic)
                 if not m:
                     return
                 self.channelstate = m.group(1)
-                if self.debug: print 'matched ' + self.channelstate
+                if self.debug: print('matched ' + self.channelstate)
 
-                print "channelstate: " + self.channelstate
-                print "doorstate: " + self.doorstate
+                print("channelstate: " + self.channelstate)
+                print("doorstate: " + self.doorstate)
                 if self.channelstate != self.doorstate:
-                    print "replacing topic"
+                    print("replacing topic")
                     #bot.setTopic(bot.getTopic().replace(/hq.*?\|/g, doorstate + " |"));
                     #bot.say(bot.getTopic().replace(/\bhq\b \b\w*\b/, doorstate));
                     new_topic = re.sub(r'\bclub\b \b\w*\b', "club " + self.doorstate, self.topic)
