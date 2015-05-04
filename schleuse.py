@@ -92,7 +92,7 @@ class SchleuseBot(irc.bot.SingleServerIRCBot):
             self.doorstate = data
 
             if self.topic:
-                if self.debug: print "got a topic"
+                if self.debug: print "got a topic %s" % self.topic
                 m = re.match(r'\bclub\b (\b\w*\b)', self.topic)
                 if not m:
                     return
