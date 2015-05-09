@@ -187,8 +187,8 @@ class SpaceAPIHTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             "space":"CCC Munich",
             "logo":"http://muc.ccc.de/lib/tpl/muc3/images/muc3_klein.gif",
             "icon":{
-                "open":"http://www.chaostreff-dortmund.de/green.png",
-                "closed":"http://www.chaostreff-dortmund.de/red.png"
+                "open":"https://status.ctdo.de/img/green.png",
+                "closed":"https://status.ctdo.de/img/red.png"
             },
             "url":"http://muc.ccc.de/",
             "address":"Schleissheimer Str. 41, 80797 Muenchen, Germany",
