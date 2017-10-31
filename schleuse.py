@@ -1,5 +1,12 @@
 #! /usr/bin/env python
 
+import sys
+sys.path.append("/home/schleuse/build/irc/build/lib.linux-x86_64-2.7")
+sys.path.append("/home/schleuse/pyschleuse/lib/python2.7/site-packages")
+sys.path.append("/home/schleuse/build/irc")
+sys.path.append("/home/schleuse/build/six")
+sys.path.append("/home/schleuse/build/jaraco.util")
+
 import irc.bot
 import irc.client
 import irc.strings
