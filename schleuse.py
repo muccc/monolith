@@ -41,6 +41,7 @@ class SchleuseBot(irc.bot.SingleServerIRCBot):
         self.topic = None
         self.debug = True
         self.nextevent = None
+        self.topic_block = False
 
     def start(self):
         while True:
@@ -72,10 +73,12 @@ class SchleuseBot(irc.bot.SingleServerIRCBot):
 
     def message_check(self):
         nextevent = json.load(urllib.urlopen('http://api.muc.ccc.de/nextevent.json'))
-        nextevent_topic = 'next event: %s %s %s' % (nextevent['date'], nextevent['time'], nextevent['name'])
+        nextevent_topic = 'next event: %s %s %s %s' % (nextevent['weekday'], nextevent['date'], nextevent['time'], nextevent['name'])
         new_topic = re.sub(r'next event:[^|]*(?= |$)', nextevent_topic , self.topic)
-        if new_topic != self.topic:
+        if new_topic != self.topic and not self.topic_block:
+            print("wegen " + new_topic + " und " + self.topic)
             self.setTopic(new_topic)
+            self.topic_block = True
 
         while not self.message_queue.empty():
             data, addr = self.message_queue.get()
@@ -107,6 +110,7 @@ class SchleuseBot(irc.bot.SingleServerIRCBot):
             self.doorstate = data
 
             if self.topic:
+                self.topic_block = False
                 if self.debug: print("got a topic %s" % self.topic)
                 m = re.match(r'\bclub\b (\b\w*\b)', self.topic)
                 if not m:
