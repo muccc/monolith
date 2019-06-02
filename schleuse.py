@@ -7,20 +7,114 @@ sys.path.append("/home/schleuse/build/irc")
 sys.path.append("/home/schleuse/build/six")
 sys.path.append("/home/schleuse/build/jaraco.util")
 
-import irc.bot
-import irc.client
-import irc.strings
 import socket
 import ssl
 import threading
 import Queue
 import time
-import re
 import BaseHTTPServer
 import SocketServer
-import json
 import logging
 import urllib
+
+
+bot = None
+
+def log_null(self, format, *args):
+    pass
+
+def main():
+    global bot
+    import sys
+    if len(sys.argv) != 4:
+        print("Usage: schleuse <server[:port]> <channel> <nickname>")
+        sys.exit(1)
+
+    s = sys.argv[1].split(":", 1)
+    server = s[0]
+    if len(s) == 2:
+        try:
+            port = int(s[1])
+        except ValueError:
+            print("Error: Erroneous port.")
+            sys.exit(1)
+    else:
+        port = 6697
+    channel = sys.argv[2]
+    nickname = sys.argv[3]
+
+    # SchleuseUDP receives UDP broadcast packets and delivers it to message_queue
+    # SchleuseBot reads from this queue, and updates bot.doorstate
+    message_queue = Queue.Queue(5)
+
+    bot = SchleuseBot(channel, nickname, server, message_queue, port)
+    bot_thread = threading.Thread(target=bot.start)
+    bot_thread.start()
+    SchleuseUDP(message_queue).start()
+
+    doorstate_http_server = BaseHTTPServer.HTTPServer(('0.0.0.0', 8080), DoorstateHTTPHandler)
+    doorstate_http_server.log_message = log_null
+    doorstate_http_server_thread = threading.Thread(target=doorstate_http_server.serve_forever)
+    doorstate_http_server_thread.setDaemon(True)
+    doorstate_http_server_thread.start()
+
+    space_api_http_server = BaseHTTPServer.HTTPServer(('0.0.0.0', 8081), SpaceAPIHTTPHandler)
+    space_api_http_server.log_message = log_null
+    space_api_http_server_thread = threading.Thread(target=space_api_http_server.serve_forever)
+    space_api_http_server_thread.setDaemon(True)
+    space_api_http_server_thread.start()
+
+    doorstate_server = BaseHTTPServer.HTTPServer(('0.0.0.0', 8001), DoorstateHandler)
+    doorstate_server_thread = threading.Thread(target=doorstate_server.serve_forever)
+    doorstate_server_thread.setDaemon(True)
+    doorstate_server_thread.start()
+
+
+    bot_thread.join()
+
+class SchleuseUDP(threading.Thread):
+    UDP_IP = "0.0.0.0"
+    UDP_PORT = 2080
+
+    def __init__(self, consumers):
+        threading.Thread.__init__(self)
+        self.consumer = consumer
+
+    def run(self):
+        sock = socket.socket(socket.AF_INET, # Internet
+                socket.SOCK_DGRAM) # UDP
+        sock.bind((self.UDP_IP, self.UDP_PORT))
+
+        while True:
+            data, addr = sock.recvfrom(1024) # buffer size is 1024 bytes
+            try:
+                self.consumer.put((data, addr), False)
+            except:
+                pass
+            #print "received message:", data
+
+class DoorstateHTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
+    def do_GET(s):
+        global bot
+        s.send_response(200)
+        s.send_header('Content-type', 'text/plain')
+        s.send_header('Cache-Control', 'max-age=0, no-cache, no-store, must-revalidate')
+        s.send_header('Pragma','no-cache')
+        s.end_headers()
+        s.wfile.write(bot.doorstate + '\n')
+
+class DoorstateHandler(SocketServer.BaseRequestHandler):
+    def handle(self):
+        global bot
+        self.request.sendall(bot.doorstate + '\n')
+
+
+
+import json
+import re
+import irc.bot
+import irc.client
+import irc.strings
 
 # Work around decoding invalid UTF-8
 irc.client.ServerConnection.buffer_class.errors = 'replace'
@@ -42,6 +136,7 @@ class SchleuseBot(irc.bot.SingleServerIRCBot):
         self.debug = True
         self.nextevent = None
         self.topic_block = False
+        self.t0 = time.time()
 
     def start(self):
         while True:
@@ -109,28 +204,38 @@ class SchleuseBot(irc.bot.SingleServerIRCBot):
 
             self.doorstate = data
 
-            if self.topic:
-                self.topic_block = False
-                if self.debug: print("got a topic %s" % self.topic)
-                m = re.match(r'\bclub\b (\b\w*\b)', self.topic)
-                if not m:
-                    return
-                self.channelstate = m.group(1)
-                if self.debug: print('matched ' + self.channelstate)
+        if self.topic:
+            self.topic_block = False
+            if self.debug: print("got a topic %s" % self.topic)
+            m = re.match(r'\bclub\b (\b\w*\b)', self.topic)
+            if not m:
+                return
+            self.channelstate = m.group(1)
+            if self.debug: print('matched ' + self.channelstate)
 
-                print("channelstate: " + self.channelstate)
-                print("doorstate: " + self.doorstate)
-                if self.channelstate != self.doorstate:
-                    print("replacing topic")
-                    #bot.setTopic(bot.getTopic().replace(/hq.*?\|/g, doorstate + " |"));
-                    #bot.say(bot.getTopic().replace(/\bhq\b \b\w*\b/, doorstate));
-                    new_topic = re.sub(r'\bclub\b \b\w*\b', "club " + self.doorstate, self.topic)
-                    self.setTopic(new_topic)
+            print("channelstate: " + self.channelstate)
+            print("doorstate: " + self.doorstate)
+            if self.channelstate != self.doorstate:
+                print("replacing topic")
+                #bot.setTopic(bot.getTopic().replace(/hq.*?\|/g, doorstate + " |"));
+                #bot.say(bot.getTopic().replace(/\bhq\b \b\w*\b/, doorstate));
+                new_topic = re.sub(r'\bclub\b \b\w*\b', "club " + self.doorstate, self.topic)
+                self.setTopic(new_topic)
+        
+        t = time.time()
+        dt = t - self.t0
+        self.t0 = t
+
+        print "delta t", dt
+        if dt < 1:
+            time.sleep(1-dt) # WTF fix for back to back message_check() scheduling
 
     def on_topic(self, c, e):
         if e.type == 'currenttopic':
+            print "currenttopic", e.arguments[1]
             self.topic = e.arguments[1]
         elif e.type == 'topic':
+            print "topic", e.arguments[0]
             self.topic = e.arguments[0]
 
 """
@@ -147,42 +252,6 @@ class SchleuseBot(irc.bot.SingleServerIRCBot):
         nick = e.source.nick
         c = self.connection
 """
-
-class SchleuseUDP(threading.Thread):
-    UDP_IP = "0.0.0.0"
-    UDP_PORT = 2080
-
-    def __init__(self, consumer):
-        threading.Thread.__init__(self)
-        self.consumer = consumer
-
-    def run(self):
-        sock = socket.socket(socket.AF_INET, # Internet
-                socket.SOCK_DGRAM) # UDP
-        sock.bind((self.UDP_IP, self.UDP_PORT))
-
-        while True:
-            data, addr = sock.recvfrom(1024) # buffer size is 1024 bytes
-            try:
-                self.consumer.put((data, addr), False)
-            except:
-                pass
-            #print "received message:", data
-
-class DoorstateHTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
-    def do_GET(s):
-        global bot
-        s.send_response(200)
-        s.send_header('Content-type', 'text/plain')
-        s.send_header('Cache-Control', 'max-age=0, no-cache, no-store, must-revalidate')
-        s.send_header('Pragma','no-cache')
-        s.end_headers()
-        s.wfile.write(bot.doorstate + '\n')
-
-class DoorstateHandler(SocketServer.BaseRequestHandler):
-    def handle(self):
-        global bot
-        self.request.sendall(bot.doorstate + '\n')
 
 class SpaceAPIHTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     def do_GET(s):
@@ -218,53 +287,6 @@ class SpaceAPIHTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             apistub['open'] = True
 
         s.wfile.write(json.dumps(apistub))
-
-bot = None
-
-def main():
-    global bot
-    import sys
-    if len(sys.argv) != 4:
-        print("Usage: schleuse <server[:port]> <channel> <nickname>")
-        sys.exit(1)
-
-    s = sys.argv[1].split(":", 1)
-    server = s[0]
-    if len(s) == 2:
-        try:
-            port = int(s[1])
-        except ValueError:
-            print("Error: Erroneous port.")
-            sys.exit(1)
-    else:
-        port = 6697
-    channel = sys.argv[2]
-    nickname = sys.argv[3]
-
-    message_queue = Queue.Queue(5)
-
-    bot = SchleuseBot(channel, nickname, server, message_queue, port)
-    bot_thread = threading.Thread(target=bot.start)
-    bot_thread.start()
-    SchleuseUDP(message_queue).start()
-
-    doorstate_http_server = BaseHTTPServer.HTTPServer(('0.0.0.0', 8080), DoorstateHTTPHandler)
-    doorstate_http_server_thread = threading.Thread(target=doorstate_http_server.serve_forever)
-    doorstate_http_server_thread.setDaemon(True)
-    doorstate_http_server_thread.start()
-
-    space_api_http_server = BaseHTTPServer.HTTPServer(('0.0.0.0', 8081), SpaceAPIHTTPHandler)
-    space_api_http_server_thread = threading.Thread(target=space_api_http_server.serve_forever)
-    space_api_http_server_thread.setDaemon(True)
-    space_api_http_server_thread.start()
-
-    doorstate_server = BaseHTTPServer.HTTPServer(('0.0.0.0', 8001), DoorstateHandler)
-    doorstate_server_thread = threading.Thread(target=doorstate_server.serve_forever)
-    doorstate_server_thread.setDaemon(True)
-    doorstate_server_thread.start()
-
-
-    bot_thread.join()
 
 if __name__ == "__main__":
     FORMAT = '%(asctime)-15s %(levelname)s: %(module)s:%(funcName)s(): %(message)s'
