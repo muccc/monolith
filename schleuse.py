@@ -47,30 +47,34 @@ def main():
     # SchleuseBot reads from this queue, and updates bot.doorstate
     message_queue = Queue.Queue(5)
 
+
+    # start IRC bot
     bot = SchleuseBot(channel, nickname, server, message_queue, port)
     bot_thread = threading.Thread(target=bot.start)
     bot_thread.start()
-    SchleuseUDP(message_queue).start()
 
-    doorstate_http_server = BaseHTTPServer.HTTPServer(('0.0.0.0', 8080), DoorstateHTTPHandler)
-    doorstate_http_server.log_message = log_null
-    doorstate_http_server_thread = threading.Thread(target=doorstate_http_server.serve_forever)
-    doorstate_http_server_thread.setDaemon(True)
-    doorstate_http_server_thread.start()
+    # connect consumers with SchleuseUDP receivers
+    SchleuseUDP([message_queue]).start()
 
-    space_api_http_server = BaseHTTPServer.HTTPServer(('0.0.0.0', 8081), SpaceAPIHTTPHandler)
-    space_api_http_server.log_message = log_null
-    space_api_http_server_thread = threading.Thread(target=space_api_http_server.serve_forever)
-    space_api_http_server_thread.setDaemon(True)
-    space_api_http_server_thread.start()
+    # start HTTP endpoints
+    doorstate_http_server = startHTTPServer(('0.0.0.0', 8080), DoorstateHTTPHandler, True)
+    space_api_http_server = startHTTPServer(('0.0.0.0', 8081), SpaceAPIHTTPHandler, True)
+    doorstate_server = startHTTPServer(('0.0.0.0', 8001), DoorstateHandler)
 
-    doorstate_server = BaseHTTPServer.HTTPServer(('0.0.0.0', 8001), DoorstateHandler)
-    doorstate_server_thread = threading.Thread(target=doorstate_server.serve_forever)
-    doorstate_server_thread.setDaemon(True)
-    doorstate_server_thread.start()
-
-
+    # join irc bot thread
     bot_thread.join()
+
+
+
+def startHTTPServer(address, handler, silence_logging = False):
+    server = BaseHTTPServer.HTTPServer(address, handler)
+    thread = threading.Thread(target=server.serve_forever)
+    if silence_logging:
+        server.log_message = log_null
+    thread.setDaemon(True)
+    thread.start()
+    return server
+
 
 class SchleuseUDP(threading.Thread):
     UDP_IP = "0.0.0.0"
@@ -78,7 +82,7 @@ class SchleuseUDP(threading.Thread):
 
     def __init__(self, consumers):
         threading.Thread.__init__(self)
-        self.consumer = consumer
+        self.consumers = consumers
 
     def run(self):
         sock = socket.socket(socket.AF_INET, # Internet
@@ -87,10 +91,11 @@ class SchleuseUDP(threading.Thread):
 
         while True:
             data, addr = sock.recvfrom(1024) # buffer size is 1024 bytes
-            try:
-                self.consumer.put((data, addr), False)
-            except:
-                pass
+            for consumer in self.consumers:
+                try:
+                    consumer.put((data, addr), False)
+                except:
+                    pass
             #print "received message:", data
 
 class DoorstateHTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
@@ -109,6 +114,7 @@ class DoorstateHandler(SocketServer.BaseRequestHandler):
         self.request.sendall(bot.doorstate + '\n')
 
 
+## IRC Bot
 
 import json
 import re
