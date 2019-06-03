@@ -45,21 +45,28 @@ def main():
 
     # SchleuseUDP receives UDP broadcast packets and delivers it to message_queue
     # SchleuseBot reads from this queue, and updates bot.doorstate
-    message_queue = Queue.Queue(5)
+    irc_bot_message_queue = Queue.Queue(5)
+    milight_queue = Queue.Queue(5)
 
 
     # start IRC bot
-    bot = SchleuseBot(channel, nickname, server, message_queue, port)
+    bot = SchleuseBot(channel, nickname, server, irc_bot_message_queue, port)
     bot_thread = threading.Thread(target=bot.start)
     bot_thread.start()
 
+
+    # start milight handler
+    milight = MilightHandler(milight_queue)
+    milight_thread = threading.Thread(target=milight.start)
+    milight_thread.start()
+
     # connect consumers with SchleuseUDP receivers
-    SchleuseUDP([message_queue]).start()
+    SchleuseUDP([irc_bot_message_queue, milight_queue]).start()
 
     # start HTTP endpoints
     doorstate_http_server = startHTTPServer(('0.0.0.0', 8080), DoorstateHTTPHandler, True)
     space_api_http_server = startHTTPServer(('0.0.0.0', 8081), SpaceAPIHTTPHandler, True)
-    doorstate_server = startHTTPServer(('0.0.0.0', 8001), DoorstateHandler)
+    doorstate_server = startHTTPServer(('0.0.0.0', 8001), DoorstateHandler, True)
 
     # join irc bot thread
     bot_thread.join()
@@ -89,14 +96,17 @@ class SchleuseUDP(threading.Thread):
                 socket.SOCK_DGRAM) # UDP
         sock.bind((self.UDP_IP, self.UDP_PORT))
 
+        old_data = None
         while True:
             data, addr = sock.recvfrom(1024) # buffer size is 1024 bytes
+            if data != old_data:    
+                print "received changed message:", data
             for consumer in self.consumers:
                 try:
                     consumer.put((data, addr), False)
                 except:
                     pass
-            #print "received message:", data
+            old_data = data
 
 class DoorstateHTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     def do_GET(s):
@@ -113,6 +123,40 @@ class DoorstateHandler(SocketServer.BaseRequestHandler):
         global bot
         self.request.sendall(bot.doorstate + '\n')
 
+import requests
+
+class MilightHandler(threading.Thread):
+    MILIGHT_GATEWAY = "10.83.11.29"
+    COLORS = {
+        'down':   12,  # red
+        'closed': 50,  # orange
+        'member': 112, # green
+        'public': 116, # violet
+    }
+
+    def __init__(self, message_queue):
+        threading.Thread.__init__(self)
+        self.message_queue = message_queue
+
+    def set_color(self, hue):
+        r = requests.put('http://' + self.MILIGHT_GATEWAY + '/gateways/13166/rgbw/3', json={"status":"on","hue":hue,"level":50}) 
+        print(r.status_code)
+
+    def run(self):
+        old_status = None
+        i = 0
+        while True:
+            # wait until a new message is in queue
+            status, addr = self.message_queue.get()
+            status = status.strip()
+            
+            if status != old_status or i % 20 == 0:
+                print('Milight: set color for ' + status)
+                self.set_color(self.COLORS[status])
+                i = 0
+
+            i += 1
+            old_status = status
 
 ## IRC Bot
 
@@ -139,7 +183,7 @@ class SchleuseBot(irc.bot.SingleServerIRCBot):
         self.lastRingDate = 0
         self.doorstate = "fnord"
         self.topic = None
-        self.debug = True
+        self.debug = False
         self.nextevent = None
         self.topic_block = False
         self.t0 = time.time()
@@ -219,9 +263,9 @@ class SchleuseBot(irc.bot.SingleServerIRCBot):
             self.channelstate = m.group(1)
             if self.debug: print('matched ' + self.channelstate)
 
-            print("channelstate: " + self.channelstate)
-            print("doorstate: " + self.doorstate)
             if self.channelstate != self.doorstate:
+                print("channelstate: " + self.channelstate)
+                print("doorstate: " + self.doorstate)
                 print("replacing topic")
                 #bot.setTopic(bot.getTopic().replace(/hq.*?\|/g, doorstate + " |"));
                 #bot.say(bot.getTopic().replace(/\bhq\b \b\w*\b/, doorstate));
@@ -232,7 +276,7 @@ class SchleuseBot(irc.bot.SingleServerIRCBot):
         dt = t - self.t0
         self.t0 = t
 
-        print "delta t", dt
+        #print "delta t", dt
         if dt < 1:
             time.sleep(1-dt) # WTF fix for back to back message_check() scheduling
 
